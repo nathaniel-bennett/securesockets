@@ -2,7 +2,7 @@
 
 The Secure Sockets library is meant to be a simple, secure and portable solution for making TLS connections as a client or server in C. Its main focus is ease of use--a developer with a working knowledge of the POSIX Sockets API in C should be able to upgrade existing HTTP code to HTTPS with the ease of a single `#include`, a single protocol flag (`IPPROTO_TLS`), and optionally a few `setsockopt()` calls to add specifics to the code configuration. No extra functions or cumbersome data types need to be learned--just a few flags that add to the existing `socket()` and `setsockopt()` functions. 
 
-Secure Sockets work by wrapping around existing libraries of functions that deal with sockets. The functions are overridden by macro replacements, which then determine whether the socket was specified as a TLS socket or not when it was created and perform their intended operations. If the socket was created regularly, any functions acting on that socket act as if the library was never included; if the socket is a TLS socket, then all of the verification and encryption needed for it will be done.
+Secure Sockets work by wrapping around existing libraries of functions that deal with sockets. The functions are overridden by macro replacements, which then determine whether the socket was specified as a TLS socket or not when it was created and perform their intended operations. If the socket was created regularly, any functions acting on that socket act as if the library was never included; if the socket is a TLS socket, then all of the verification and encryption needed for it will be done. The library uses OpenSSL under the hood.
 
 This library is meant to be helpful for anyone who wants to use TLS connections in their code. Two groups may find it especially useful, though:
 1. Those who want to upgrade an existing code bases to use HTTPS connections
@@ -25,3 +25,4 @@ Other features are in the planning phase:
 - A plethora of `setsockopt()` and `getsockopt()` additions for fine-tuning of TLS connection settings
 - Built-in threadlocks to make each TLS socket thread-safe (NOTE: regular sockets will remain not thread-safe)
 - Support for Libevent functions
+- MacOS, Windows and BSD portability
