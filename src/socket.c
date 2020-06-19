@@ -5,7 +5,7 @@
 #include <openssl/ssl.h>
 
 #include "err_internal.h"
-#include "original_functions.h"
+#include "original_posix.h"
 #include "socket.h"
 #include "socket_hashmap.h"
 
@@ -43,6 +43,10 @@ socket_ctx *socket_ctx_new(int sockfd)
 
     sock_ctx = calloc(1, sizeof(socket_ctx));
     if (sock_ctx == NULL)
+        goto err;
+
+    sock_ctx->addr = calloc(1, sizeof(struct sockaddr));
+    if (sock_ctx->addr == NULL)
         goto err;
 
     sock_ctx->fd = -1;
@@ -87,6 +91,7 @@ socket_ctx *accept_sock_ctx_new(int accepted_fd, socket_ctx *listening_ctx)
         goto err;
 
     sock_ctx->fd = accepted_fd;
+    sock_ctx->is_nonblocking = listening_ctx->is_nonblocking;
 
     sock_ctx->ssl = SSL_new(listening_ctx->ssl_ctx);
     if (sock_ctx->ssl == NULL)
@@ -107,8 +112,9 @@ socket_ctx *accept_sock_ctx_new(int accepted_fd, socket_ctx *listening_ctx)
     if (ret != 0)
         goto err;
 
+
     sock_ctx->id = id;
-    sock_ctx->state = SOCKET_NEW;
+    sock_ctx->state = SOCKET_CONNECTING_TLS;
 
     return sock_ctx;
 err:
@@ -124,6 +130,9 @@ err:
 void socket_ctx_free(socket_ctx *sock_ctx)
 {
     int error = errno;
+
+    if (sock_ctx->addr != NULL)
+        free(sock_ctx->addr);
 
     if (sock_ctx->ssl != NULL)
         SSL_free(sock_ctx->ssl);
@@ -242,10 +251,11 @@ int is_wrong_socket_state(socket_ctx* sock_ctx, int num, ...)
 
     switch(sock_ctx->state) {
     case SOCKET_ERROR:
-        errno = EBADFD;
+        set_errno_code(sock_ctx, EBADFD);
     default:
-        errno = EOPNOTSUPP;
+        set_errno_code(sock_ctx, EOPNOTSUPP);
     }
+
 
     return 1;
 }
@@ -272,7 +282,7 @@ int prepare_socket_for_connection(socket_ctx *sock_ctx)
 
     return 1;
 err:
-    set_socket_error_ssl(sock_ctx);
+    set_ssl_socket_error(sock_ctx);
     return 0;
 }
 
@@ -284,17 +294,17 @@ int attempt_socket_tls_connection(socket_ctx *sock_ctx)
         int reason = SSL_get_error(sock_ctx->ssl, ret);
         if (reason == SSL_ERROR_WANT_READ
             || reason == SSL_ERROR_WANT_WRITE) {
-            errno = EALREADY;
+            set_errno_code(sock_ctx, EALREADY);
             return 0;
 
         } else if (reason == SSL_ERROR_SYSCALL) {
             if (errno == NO_ERROR)
-                errno = ECONNRESET;
+                set_errno_code(sock_ctx, ECONNRESET);
             /* errno already has details in this case */
             return 0;
 
         } else if (reason == SSL_ERROR_ZERO_RETURN) {
-            errno = ECONNRESET;
+            set_errno_code(sock_ctx, ECONNRESET);
             return 0;
 
         } else {
@@ -305,15 +315,14 @@ int attempt_socket_tls_connection(socket_ctx *sock_ctx)
 
     X509 *peer_cert = SSL_get_peer_certificate(sock_ctx->ssl);
     if (peer_cert == NULL) {
-        set_err_string(sock_ctx, "TLS handshake error: "
-                                 "peer presented no certificate");
-        errno = EPROTO;
+        set_socket_error(sock_ctx, EPROTO,
+                    "TLS handshake error: peer presented no certificate");
         return 0;
     }
 
     X509_free(peer_cert);
 
-    errno = NO_ERROR;
+    set_errno_code(sock_ctx, NO_ERROR);
     return 1;
 }
 

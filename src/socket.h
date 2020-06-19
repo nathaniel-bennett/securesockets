@@ -1,7 +1,10 @@
 #ifndef SAFETLS__SOCKET_H
 #define SAFETLS__SOCKET_H
 
+#include <sys/socket.h>
+
 #include <openssl/ssl.h>
+
 
 
 #define MAX_ERR_STRING 255
@@ -17,7 +20,7 @@ enum socket_state {
     SOCKET_CONNECTING_DNS,
     SOCKET_CONNECTING_TCP,
     SOCKET_CONNECTING_TLS,
-    SOCKET_CHECKING_REVOCATION,
+    SOCKET_FINISHING_CONN, /* for revocation or async functions */
     SOCKET_CONNECTED,
     SOCKET_LISTENING
 };
@@ -32,8 +35,15 @@ struct socket_ctx_st {
 
     socket_ctx *accept_ctx;
 
+    struct sockaddr *addr; /* TODO: copy to avoid invalid access? */
+    socklen_t addrlen;
+
+    int is_nonblocking;
+
     /* used primarily to hold information for setsockopt/getsockopt */
     char hostname[MAX_HOSTNAME+1];
+
+    int error_code;
     char err_str[MAX_ERR_STRING+1];
     int block_padding_size;
 };

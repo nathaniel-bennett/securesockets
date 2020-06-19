@@ -5,9 +5,12 @@
 #include <openssl/ssl.h>
 
 #include "../err_internal.h"
-#include "../original_functions.h"
+#include "../original_posix.h"
 #include "../socket_hashmap.h"
 #include "../../include/tls.h"
+
+/* SO_ERROR */
+int get_socket_error(socket_ctx *sock_ctx, int *error, socklen_t *len);
 
 /* Hostname */
 int get_hostname(socket_ctx *sock_ctx, char *hostname, socklen_t *len);
@@ -63,6 +66,9 @@ int WRAPPER_getsockopt(int sockfd, int level,
     sock_ctx = get_tls_socket(sockfd);
     if (sock_ctx == NULL)
         return o_getsockopt(sockfd, level, optname, optval, optlen);
+
+    if (level == SOL_SOCKET && optname == SO_ERROR)
+        return get_socket_error(sock_ctx, (int*) optval, optlen);
 
     /* regular getsockopt on a TLS socket */
     if (level != IPPROTO_TLS)
@@ -155,6 +161,17 @@ int WRAPPER_setsockopt(int sockfd, int level,
 /*******************************************************************************
  *         INDIVIDUAL SETSOCKOPT/GETSOCKOPT FUNCTION IMPLEMENTATIONS
  ******************************************************************************/
+
+int get_socket_error(socket_ctx *sock_ctx, int *error, socklen_t *len)
+{
+    if (size_not_equal_to(*len, sizeof(int)))
+        return -1;
+
+    *error = sock_ctx->error_code;
+    sock_ctx->error_code = NO_ERROR;
+
+    return 0;
+}
 
 
 

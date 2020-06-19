@@ -2,8 +2,8 @@
  * Written by Nathaniel Bennett
  */
 
-#ifndef SAFETLS__TLS_H
-#define SAFETLS__TLS_H
+#ifndef SECURESOCKETS_INCLUDE_TLS_H
+#define SECURESOCKETS_INCLUDE_TLS_H
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -19,7 +19,6 @@
 #define SO_TLS_ERROR_STRING           6
 #define SO_TLS_COMPRESSION            7
 #define SO_TLS_1_3_RECORD_PADDING     8
-
 
 
 

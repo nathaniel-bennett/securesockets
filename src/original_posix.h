@@ -20,7 +20,7 @@ int o_listen(int sockfd, int backlog);
 
 int o_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 
-/* TODO: add accept4 here */
+int o_accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags);
 
 int o_close(int sockfd);
 

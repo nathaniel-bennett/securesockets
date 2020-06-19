@@ -66,6 +66,7 @@ int add_tls_socket(int id, socket_ctx *sock_ctx)
     if (new_node == NULL)
         return -1;
 
+
     new_node->id = id;
     new_node->sock_ctx = sock_ctx;
     new_node->next = NULL;

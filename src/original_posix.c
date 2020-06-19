@@ -1,10 +1,6 @@
-#define _GNU_SOURCE
-#include <fcntl.h>
-#include <signal.h>
-#include <stdarg.h>
 #include <unistd.h>
 
-#include "original_functions.h"
+#include "original_posix.h"
 
 
 int o_socket(int domain, int type, int protocol)
@@ -32,7 +28,11 @@ int o_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
     return accept(sockfd, addr, addrlen);
 }
 
-/* TODO: add accept4 here */
+/* SOCK_NONBLOCK and SOCK_CLOEXEC are both safe */
+int o_accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags)
+{
+    return accept4(sockfd, addr, addrlen, flags);
+}
 
 int o_close(int sockfd)
 {

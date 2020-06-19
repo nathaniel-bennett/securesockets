@@ -8,69 +8,79 @@
 
 
 
-void set_err_string(socket_ctx *sock_ctx, char *error_string, ...)
-{
-    va_list args;
-
-    clear_socket_errors(sock_ctx);
-
-    va_start(args, error_string);
-    vsnprintf(sock_ctx->err_str, MAX_ERR_STRING, error_string, args);
-    va_end(args);
-}
-
 void set_handshake_socket_error(socket_ctx *sock_ctx)
 {
     unsigned long ssl_err = ERR_peek_error();
     long handshake_err = SSL_get_verify_result(sock_ctx->ssl);
 
-    clear_all_errors(sock_ctx);
+    const char *handshake_str = X509_verify_cert_error_string(handshake_err);
+    const char *ssl_str = ERR_reason_error_string(ssl_err);
 
-    const char *handshake_e_str = X509_verify_cert_error_string(handshake_err);
-    const char *ssl_err_string = ERR_reason_error_string(ssl_err);
+    clear_all_errors(sock_ctx);
 
     switch (handshake_err) {
     case X509_V_OK:
         break;
 
     case X509_V_ERR_OUT_OF_MEM:
-        errno = ENOMEM;
+        set_errno_code(sock_ctx, ENOMEM);
         return;
 
     default:
-        set_err_string(sock_ctx, "TLS handshake error %li: %s",
-            handshake_err, handshake_e_str);
-        errno = EPROTO;
+        set_socket_error(sock_ctx, EPROTO,
+                "TLS handshake error %li: %s", handshake_err, handshake_str);
         return;
     }
 
     if (ERR_GET_REASON(ssl_err) == ERR_R_MALLOC_FAILURE) {
-        errno = ENOMEM;
+        set_errno_code(sock_ctx, ENOMEM);
         return;
     }
 
     if (ERR_GET_LIB(ssl_err) == ERR_LIB_SSL) {
-
         switch(ERR_GET_REASON(ssl_err)) {
         case SSL_R_SSLV3_ALERT_HANDSHAKE_FAILURE:
-            set_err_string(sock_ctx, "TLS handshake error: peer sent alert "
-                                     "(likely no common TLS version/ciphers)");
+            set_socket_error(sock_ctx, EPROTO,
+                        "TLS handshake error: peer sent alert "
+                        "(likely no common TLS version/ciphers)");
             break;
 
-        default:
-            set_err_string(sock_ctx,
-                "TLS handshake error: %s",
-                ssl_err_string);
-        }
+            /* add more error cases here as needs be */
 
-        errno = EPROTO;
-        return;
+        default:
+            set_socket_error(sock_ctx,
+                        EPROTO, "TLS handshake error: %s", ssl_str);
+        }
+    } else {
+        set_socket_error(sock_ctx, ECONNABORTED, "TLS error: %s", ssl_str);
     }
 
-    set_err_string(sock_ctx, "TLS error: %s", ssl_err_string);
+    return;
 }
 
-void set_socket_error_ssl(socket_ctx *sock_ctx)
+void set_errno_code(socket_ctx *sock_ctx, int errno_code)
+{
+    if (sock_ctx != NULL)
+        sock_ctx->error_code = errno_code;
+    errno = errno_code;
+}
+
+void set_socket_error(socket_ctx *sock_ctx, int error, char *err_string, ...)
+{
+    va_list args;
+
+    clear_socket_errors(sock_ctx);
+
+    errno = error;
+    sock_ctx->error_code = error;
+
+    va_start(args, err_string);
+    vsnprintf(sock_ctx->err_str, MAX_ERR_STRING, err_string, args);
+    va_end(args);
+}
+
+
+void set_ssl_socket_error(socket_ctx *sock_ctx)
 {
     return set_socket_error_from_code(sock_ctx, ERR_peek_error());
 }
@@ -83,25 +93,11 @@ void set_socket_error_from_code(socket_ctx *sock_ctx, unsigned long err)
 
     clear_all_errors(sock_ctx);
 
-    if (ERR_GET_REASON(err) == ERR_R_MALLOC_FAILURE) {
-        errno = ENOMEM;
-        return;
-    }
-
-    set_err_string(sock_ctx, "TLS error: %s", err_string);
-    errno = ECANCELED;
+    if (ERR_GET_REASON(err) == ERR_R_MALLOC_FAILURE)
+        set_errno_code(sock_ctx, ENOMEM);
+    else
+        set_socket_error(sock_ctx, ECANCELED, "TLS error: %s", err_string);
 }
-
-void set_errno_from_ssl()
-{
-    unsigned long err = ERR_peek_error();
-    if (ERR_GET_REASON(err) == ERR_R_MALLOC_FAILURE) {
-        errno = ENOMEM;
-    }
-
-    errno = ECANCELED;
-}
-
 
 void clear_global_errors()
 {
@@ -111,6 +107,7 @@ void clear_global_errors()
 
 void clear_socket_errors(socket_ctx *sock_ctx)
 {
+    sock_ctx->error_code = NO_ERROR;
     memset(sock_ctx->err_str, '\0', MAX_ERR_STRING+1);
 }
 
@@ -119,5 +116,6 @@ void clear_all_errors(socket_ctx *sock_ctx)
     clear_socket_errors(sock_ctx);
     clear_global_errors();
 }
+
 
 

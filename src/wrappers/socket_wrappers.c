@@ -7,7 +7,7 @@
 #include <string.h>
 
 
-#include "../original_functions.h" /* This MUST be before tls.h */
+#include "../original_posix.h" /* This MUST be before tls.h */
 #include "../socket.h"
 #include "../err_internal.h"
 #include "../socket_hashmap.h"
@@ -63,7 +63,7 @@ int WRAPPER_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 
     ret = o_bind(sock_ctx->fd, addr, addrlen);
     if (ret != 0)
-        sock_ctx->state = SOCKET_ERROR;
+        set_errno_code(sock_ctx, errno);
 
     return ret;
 }
@@ -81,25 +81,27 @@ int WRAPPER_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
     clear_all_errors(sock_ctx);
 
     if (strlen(sock_ctx->hostname) <= 0) {
-        errno = ECONNABORTED;
-        set_err_string(sock_ctx,
+        set_socket_error(sock_ctx, ECONNABORTED,
             "TLS handshake error: "
             "no hostname was given to authenticate the connection");
         return -1;
     }
-
 
     switch(sock_ctx->state) {
     case SOCKET_NEW:
         if (prepare_socket_for_connection(sock_ctx) != 1)
             goto err;
 
+        memcpy(sock_ctx->addr, addr, sizeof(struct sockaddr));
+        sock_ctx->addrlen = addrlen;
         sock_ctx->state = SOCKET_CONNECTING_TCP;
 
         /* FALL THROUGH */
     case SOCKET_CONNECTING_TCP:
         ret = o_connect(sock_ctx->fd, addr, addrlen);
         if (ret == -1) {
+            set_errno_code(sock_ctx, errno);
+
             if (errno == EAGAIN || errno == EALREADY || errno == EINPROGRESS)
                 return -1;
             else
@@ -121,15 +123,15 @@ int WRAPPER_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
         return 0;
 
     case SOCKET_CONNECTED:
-        errno = EISCONN;
+        set_errno_code(sock_ctx, EISCONN);
         return -1;
 
     case SOCKET_ERROR:
-        errno = EBADFD;
+        set_errno_code(sock_ctx, EBADFD);
         return -1;
 
     default:
-        errno = EOPNOTSUPP;
+        set_errno_code(sock_ctx, EOPNOTSUPP);
         return -1;
     }
 
@@ -180,8 +182,18 @@ int WRAPPER_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
         return -1;
 
     if (!already_accepting_connection(listener)) {
-        new_fd = o_accept(listener->fd, addr, addrlen);
+        struct sockaddr tmp_addr;
+        socklen_t tmp_addrlen;
+
+
+        if (listener->is_nonblocking)
+             new_fd = o_accept4(listener->fd,
+                        &tmp_addr, &tmp_addrlen, SOCK_NONBLOCK);
+        else
+            new_fd = o_accept(listener->fd, &tmp_addr, &tmp_addrlen);
+
         if (new_fd < 0) {
+            set_errno_code(listener, errno);
             if (errno == EAGAIN || errno == EWOULDBLOCK)
                 return -1;
 
@@ -193,42 +205,67 @@ int WRAPPER_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
         listener->accept_ctx = accept_sock_ctx_new(new_fd, listener);
         if (listener->accept_ctx == NULL)
             goto err; /* close(new_fd) called within accept_sock_ctx_new() */
+
+        memcpy(listener->accept_ctx->addr, &tmp_addr, sizeof(struct sockaddr));
+        listener->accept_ctx->addrlen = tmp_addrlen;
     }
 
-    ret = SSL_connect(listener->accept_ctx->ssl);
-    if (ret != 1) {
-        switch (SSL_get_error(listener->ssl, ret)) {
-        case SSL_ERROR_WANT_READ:
-        case SSL_ERROR_WANT_WRITE:
-            errno = EALREADY;
-            return -1;
+    switch (listener->accept_ctx->state) {
+    case SOCKET_CONNECTING_TLS:
+        ret = SSL_connect(listener->accept_ctx->ssl);
+        if (ret!=1) {
+            switch (SSL_get_error(listener->ssl, ret)) {
+            case SSL_ERROR_WANT_READ:
+            case SSL_ERROR_WANT_WRITE:
+                set_errno_code(listener, EAGAIN);
+                return -1;
 
-        case SSL_ERROR_SYSCALL:
-            goto err;
+            case SSL_ERROR_SYSCALL:
+                goto err;
 
-        case SSL_ERROR_ZERO_RETURN:
-            errno = ECONNABORTED;
-            goto err;
+            case SSL_ERROR_ZERO_RETURN:
+                set_errno_code(listener, ECONNABORTED);
+                goto err;
 
-        default:
-            set_socket_error_ssl(listener);
+            default:
+                set_ssl_socket_error(listener);
+                goto err;
+            }
+        }
+
+        listener->accept_ctx->state = SOCKET_FINISHING_CONN;
+        if (listener->is_nonblocking) {
+            set_errno_code(listener, EAGAIN);
+            return -1; /* INCREDIBLY helpful to do this way for select/poll */
+        }
+
+        /* FALL THROUGH */
+    case SOCKET_FINISHING_CONN:
+        listener->accept_ctx->state = SOCKET_CONNECTED;
+
+        /* FALL THROUGH */
+    case SOCKET_CONNECTED:
+
+        ret = add_tls_socket(listener->accept_ctx->id, listener->accept_ctx);
+        if (ret != 0) {
+            set_errno_code(listener, ENOMEM);
             goto err;
         }
-    }
 
-    listener->accept_ctx->state = SOCKET_CONNECTED;
+        /* finally return the address/addrlen we saved */
+        memcpy(addr, listener->accept_ctx->addr, sizeof(struct sockaddr));
+        *addrlen = listener->accept_ctx->addrlen;
 
-    ret = add_tls_socket(listener->accept_ctx->id, listener->accept_ctx);
-    if (ret != 0) {
-        errno = ENOMEM;
+        int new_id = listener->accept_ctx->id;
+        listener->accept_ctx = NULL;
+
+        return new_id;
+
+    default:
+        /* should NEVER happen */
+        set_errno_code(listener, ECONNABORTED);
         goto err;
     }
-
-    int new_id = listener->accept_ctx->id;
-    listener->accept_ctx = NULL;
-
-    return new_id;
-
 err:
     if (listener->accept_ctx != NULL)
         socket_ctx_free(listener->accept_ctx);
@@ -263,19 +300,20 @@ int WRAPPER_read(int fd, void *buf, size_t count)
         return 0;
 
     case SSL_ERROR_WANT_READ:
-        errno = EAGAIN;
+        set_errno_code(sock_ctx, EAGAIN);
         return -1;
 
     case SSL_ERROR_SYSCALL:
+        set_errno_code(sock_ctx, errno);
         sock_ctx->state = SOCKET_ERROR;
+
         if (errno == NO_ERROR) /* unexpected EOF */
             return 0;
         else
             return -1;
 
     default: /* SSL_ERROR_SSL: */
-        errno = EPROTO;
-        set_socket_error_ssl(sock_ctx);
+        set_ssl_socket_error(sock_ctx);
         sock_ctx->state = SOCKET_ERROR;
         return -1;
     }
@@ -308,19 +346,20 @@ int WRAPPER_write(int fd, const void *buf, size_t count)
 
     case SSL_ERROR_WANT_READ:
     case SSL_ERROR_WANT_WRITE:
-        errno = EAGAIN;
+        set_errno_code(sock_ctx, EAGAIN);
         return -1;
 
     case SSL_ERROR_SYSCALL:
+        set_errno_code(sock_ctx, errno);
         sock_ctx->state = SOCKET_ERROR;
+
         if (errno == NO_ERROR) /* unexpected EOF */
             return 0;
         else
             return -1;
 
     default: /* SSL_ERROR_SSL: */
-        errno = EPROTO;
-        set_socket_error_ssl(sock_ctx);
+        set_ssl_socket_error(sock_ctx);
         sock_ctx->state = SOCKET_ERROR;
         return -1;
     }
@@ -338,8 +377,8 @@ int WRAPPER_send(int sockfd, const void *buf, size_t len, int flags)
     } else {
         /* As it stands, OpenSSL does not have functionality for implementing
          * the flags in send and recv; so any flags returns EOPNOTSUPP */
-        set_err_string(sock_ctx, "send flags are not supported by TLS sockets");
-        errno = EOPNOTSUPP;
+        set_socket_error(sock_ctx, EOPNOTSUPP,
+                    "send flags are not supported by TLS sockets");
         return -1;
     }
 }
@@ -354,8 +393,8 @@ int WRAPPER_recv(int sockfd, void *buf, size_t len, int flags)
         return WRAPPER_read(sockfd, buf, len);
 
     } else {
-        set_err_string(sock_ctx, "recv flags are not supported by TLS sockets");
-        errno = EOPNOTSUPP;
+        set_socket_error(sock_ctx, EOPNOTSUPP,
+            "recv flags are not supported by TLS sockets");
         return -1;
     }
 }
