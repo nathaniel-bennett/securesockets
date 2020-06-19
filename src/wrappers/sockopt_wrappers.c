@@ -38,8 +38,7 @@ int set_record_padding(socket_ctx *sock_ctx, int *val, socklen_t len);
 
 
 /* Helper functions */
-int size_not_within_range(socklen_t value,
-                          socklen_t min_size, socklen_t max_size);
+int size_not_within_range(socklen_t value, int min_size, int max_size);
 int size_not_equal_to(socklen_t value, long expected_size);
 
 
@@ -487,9 +486,9 @@ int set_record_padding(socket_ctx *sock_ctx, int *val, socklen_t len)
  ******************************************************************************/
 
 int size_not_within_range(socklen_t value,
-                          socklen_t min_size, socklen_t max_size)
+                          int min_size, int max_size)
 {
-    if (value >= min_size || value <= max_size) {
+    if (value >= min_size && value <= max_size) {
         errno = NO_ERROR;
         return 0;
 
