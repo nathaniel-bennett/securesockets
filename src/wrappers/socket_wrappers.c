@@ -28,7 +28,7 @@ int WRAPPER_socket(int domain, int type, int protocol)
     if (protocol != IPPROTO_TLS)
         return o_socket(domain, type, protocol);
 
-    if (type != AF_HOSTNAME) {
+    if (!(type & AF_HOSTNAME)) {
         sockfd = o_socket(domain, type, IPPROTO_TCP);
         if (sockfd == -1)
             goto err;
@@ -37,6 +37,9 @@ int WRAPPER_socket(int domain, int type, int protocol)
     sock_ctx = socket_ctx_new(sockfd);
     if (sock_ctx == NULL)
         goto err;
+
+    if (type & SOCK_NONBLOCK)
+        sock_ctx->is_nonblocking = 1;
 
     return sock_ctx->id;
 err:
