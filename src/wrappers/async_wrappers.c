@@ -3,6 +3,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "../original_posix.h"
 #include "../original_async.h"
 
 #include "../socket.h"
@@ -133,6 +134,18 @@ int WRAPPER_ppoll(struct pollfd *fds, nfds_t nfds,
             if (sock_ctx == NULL)
                 continue;
 
+            if (fds[i].revents & POLLERR) {
+                int error;
+                socklen_t error_size = sizeof(int);
+                ret = o_getsockopt(fds[i].fd,
+                            SOL_SOCKET, SO_ERROR, &error, &error_size);
+                if (ret != 0)
+                    sock_ctx->error_code = ECANCELED; /* TODO: fix */
+                else
+                    sock_ctx->error_code = error;
+                continue; /* TODO: wipe POLLIN | POLLOUT flags? */
+            }
+
             if (!(fds[i].revents & (POLLIN | POLLOUT)))
                 continue;
 
@@ -145,7 +158,7 @@ int WRAPPER_ppoll(struct pollfd *fds, nfds_t nfds,
                 if (ret < 0) {
                     fds[i].revents &= ~(POLLIN | POLLOUT);
 
-                    if (errno != EAGAIN)
+                    if (errno != EAGAIN && errno != EALREADY)
                         fds[i].revents |= POLLERR;
                     else
                         num_ready--;
