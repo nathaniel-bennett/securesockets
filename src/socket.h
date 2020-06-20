@@ -52,9 +52,10 @@ struct socket_ctx_st {
 
 socket_ctx *socket_ctx_new(int sockfd);
 
-int already_accepting_connection(socket_ctx *sock_ctx);
+int currently_accepting_connection(socket_ctx *listener);
+void stop_accepting_connection(socket_ctx *listener);
 
-socket_ctx *accept_sock_ctx_new(int accepted_fd, socket_ctx *listening_ctx);
+socket_ctx *socket_ctx_accepted_new(int accepted_fd, socket_ctx *listening_ctx);
 
 void socket_ctx_free(socket_ctx *sock_ctx);
 

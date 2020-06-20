@@ -1,4 +1,3 @@
-
 #ifndef SAFETLS__ORIGINAL_FUNCTIONS_H
 #define SAFETLS__ORIGINAL_FUNCTIONS_H
 
@@ -18,12 +17,9 @@ int o_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 
 int o_listen(int sockfd, int backlog);
 
-int o_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
-
 int o_accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags);
 
 int o_close(int sockfd);
-
 
 int o_getsockopt(int sockfd, int level,
                        int optname, void *optval, socklen_t *optlen);

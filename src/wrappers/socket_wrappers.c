@@ -169,7 +169,8 @@ int WRAPPER_listen(int sockfd, int backlog)
 }
 
 
-int WRAPPER_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
+int WRAPPER_accept4(int sockfd,
+            struct sockaddr *addr, socklen_t *addrlen, int flags)
 {
     socket_ctx *listener = NULL;
     int new_fd;
@@ -177,24 +178,22 @@ int WRAPPER_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 
     listener = get_tls_socket(sockfd);
     if (listener == NULL)
-        return o_accept(sockfd, addr, addrlen);
+        return o_accept4(sockfd, addr, addrlen, flags);
 
     clear_all_errors(listener);
 
     if (is_wrong_socket_state(listener, 1, SOCKET_LISTENING))
         return -1;
 
-    if (!already_accepting_connection(listener)) {
+    /* TODO: pipeline these accepting operations when nonblocking somehow */
+    if (!currently_accepting_connection(listener)) {
         struct sockaddr tmp_addr;
         socklen_t tmp_addrlen;
 
-
         if (listener->is_nonblocking)
-             new_fd = o_accept4(listener->fd,
-                        &tmp_addr, &tmp_addrlen, SOCK_NONBLOCK);
-        else
-            new_fd = o_accept(listener->fd, &tmp_addr, &tmp_addrlen);
+            flags |= SOCK_NONBLOCK;
 
+        new_fd = o_accept4(listener->fd, &tmp_addr, &tmp_addrlen, flags);
         if (new_fd < 0) {
             set_errno_code(listener, errno);
             if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -202,21 +201,25 @@ int WRAPPER_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 
             if (is_fatal_listener_error(errno))
                 listener->state = SOCKET_ERROR;
+
             goto err;
         }
 
-        listener->accept_ctx = accept_sock_ctx_new(new_fd, listener);
+        listener->accept_ctx = socket_ctx_accepted_new(new_fd, listener);
         if (listener->accept_ctx == NULL)
-            goto err; /* close(new_fd) called within accept_sock_ctx_new() */
+            goto err; /* close called within socket_ctx_accepted_new() */
 
         memcpy(listener->accept_ctx->addr, &tmp_addr, sizeof(struct sockaddr));
         listener->accept_ctx->addrlen = tmp_addrlen;
+
+        if (flags & SOCK_NONBLOCK)
+            listener->accept_ctx->is_nonblocking = 1;
     }
 
     switch (listener->accept_ctx->state) {
     case SOCKET_CONNECTING_TLS:
         ret = SSL_connect(listener->accept_ctx->ssl);
-        if (ret!=1) {
+        if (ret != 1) {
             switch (SSL_get_error(listener->ssl, ret)) {
             case SSL_ERROR_WANT_READ:
             case SSL_ERROR_WANT_WRITE:
@@ -270,9 +273,8 @@ int WRAPPER_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
         goto err;
     }
 err:
-    if (listener->accept_ctx != NULL)
-        socket_ctx_free(listener->accept_ctx);
-    listener->accept_ctx = NULL;
+    if (currently_accepting_connection(listener))
+        stop_accepting_connection(listener);
     return -1;
 }
 

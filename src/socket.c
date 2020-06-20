@@ -75,12 +75,20 @@ err:
     return NULL;
 }
 
-int already_accepting_connection(socket_ctx *sock_ctx)
+int currently_accepting_connection(socket_ctx *listener)
 {
-    return (sock_ctx->accept_ctx == NULL) ? 0 : 1;
+    return (listener->accept_ctx == NULL) ? 0 : 1;
 }
 
-socket_ctx *accept_sock_ctx_new(int accepted_fd, socket_ctx *listening_ctx)
+void stop_accepting_connection(socket_ctx *listener)
+{
+    if (listener->accept_ctx != NULL) {
+        socket_ctx_free(listener->accept_ctx);
+        listener->accept_ctx = NULL;
+    }
+}
+
+socket_ctx *socket_ctx_accepted_new(int accepted_fd, socket_ctx *listening_ctx)
 {
     socket_ctx *sock_ctx;
     int id;
@@ -91,7 +99,6 @@ socket_ctx *accept_sock_ctx_new(int accepted_fd, socket_ctx *listening_ctx)
         goto err;
 
     sock_ctx->fd = accepted_fd;
-    sock_ctx->is_nonblocking = listening_ctx->is_nonblocking;
 
     sock_ctx->ssl = SSL_new(listening_ctx->ssl_ctx);
     if (sock_ctx->ssl == NULL)

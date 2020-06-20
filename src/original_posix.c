@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <unistd.h>
 
 #include "original_posix.h"
@@ -23,12 +24,6 @@ int o_listen(int sockfd, int backlog)
     return listen(sockfd, backlog);
 }
 
-int o_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
-{
-    return accept(sockfd, addr, addrlen);
-}
-
-/* SOCK_NONBLOCK and SOCK_CLOEXEC are both safe */
 int o_accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags)
 {
     return accept4(sockfd, addr, addrlen, flags);

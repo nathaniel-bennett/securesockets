@@ -30,9 +30,8 @@ int WRAPPER_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 
 int WRAPPER_listen(int sockfd, int backlog);
 
-int WRAPPER_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
-
-/* TODO: add accept4 here */
+int WRAPPER_accept4(int sockfd,
+            struct sockaddr *addr, socklen_t *addrlen, int flags);
 
 int WRAPPER_close(int sockfd);
 
@@ -62,7 +61,10 @@ int WRAPPER_recv(int sockfd, void *buf, size_t len, int flags);
 
 #define listen(sockfd, backlog) WRAPPER_listen(sockfd, backlog)
 
-#define accept(sockfd, addr, addrlen) WRAPPER_accept(sockfd, addr, addrlen)
+#define accept(sockfd, addr, addrlen) WRAPPER_accept4(sockfd, addr, addrlen, 0)
+
+#define accept4(sockfd, addr, addrlen, flags) \
+            WRAPPER_accept4(sockfd, addr, addrlen, flags)
 
 #define close(sockfd) WRAPPER_close(sockfd)
 
