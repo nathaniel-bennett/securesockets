@@ -21,18 +21,16 @@ int is_fatal_listener_error(int error);
 int WRAPPER_socket(int domain, int type, int protocol)
 {
     socket_ctx *sock_ctx = NULL;
-    int sockfd = -1;
+    int sockfd;
 
     clear_global_errors();
 
     if (protocol != IPPROTO_TLS)
         return o_socket(domain, type, protocol);
 
-    if (!(type & AF_HOSTNAME)) {
-        sockfd = o_socket(domain, type, IPPROTO_TCP);
-        if (sockfd == -1)
-            goto err;
-    }
+    sockfd = o_socket(domain, type, IPPROTO_TCP);
+    if (sockfd == -1)
+        goto err;
 
     sock_ctx = socket_ctx_new(sockfd);
     if (sock_ctx == NULL)
@@ -92,11 +90,9 @@ int WRAPPER_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 
     switch(sock_ctx->state) {
     case SOCKET_NEW:
-        if (prepare_socket_for_connection(sock_ctx) != 1)
+        if (prepare_socket_for_connection(sock_ctx, addr, addrlen) != 1)
             goto err;
 
-        memcpy(sock_ctx->addr, addr, sizeof(struct sockaddr));
-        sock_ctx->addrlen = addrlen;
         sock_ctx->state = SOCKET_CONNECTING_TCP;
 
         /* FALL THROUGH */
@@ -185,7 +181,7 @@ int WRAPPER_accept4(int sockfd,
     if (is_wrong_socket_state(listener, 1, SOCKET_LISTENING))
         return -1;
 
-    /* TODO: pipeline these accepting operations when nonblocking somehow */
+    /* TODO: pipeline these accepting operations when nonblocking? */
     if (!currently_accepting_connection(listener)) {
         struct sockaddr tmp_addr;
         socklen_t tmp_addrlen;
@@ -205,12 +201,15 @@ int WRAPPER_accept4(int sockfd,
             goto err;
         }
 
-        listener->accept_ctx = socket_ctx_accepted_new(new_fd, listener);
-        if (listener->accept_ctx == NULL)
-            goto err; /* close called within socket_ctx_accepted_new() */
+        listener->accept_ctx = socket_ctx_accepted_new(new_fd,
+                    listener, tmp_addr, tmp_addrlen);
 
-        memcpy(listener->accept_ctx->addr, &tmp_addr, sizeof(struct sockaddr));
-        listener->accept_ctx->addrlen = tmp_addrlen;
+        if (listener->accept_ctx == NULL) {
+            set_errno_code(listener, ENOMEM); /* TODO: better code here */
+            goto err; /* close called within socket_ctx_accepted_new() */
+        }
+
+
 
         if (flags & SOCK_NONBLOCK)
             listener->accept_ctx->is_nonblocking = 1;

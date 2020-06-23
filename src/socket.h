@@ -35,7 +35,7 @@ struct socket_ctx_st {
 
     socket_ctx *accept_ctx;
 
-    struct sockaddr *addr; /* TODO: copy to avoid invalid access? */
+    struct sockaddr *addr;
     socklen_t addrlen;
 
     int is_nonblocking;
@@ -55,15 +55,15 @@ socket_ctx *socket_ctx_new(int sockfd);
 int currently_accepting_connection(socket_ctx *listener);
 void stop_accepting_connection(socket_ctx *listener);
 
-socket_ctx *socket_ctx_accepted_new(int accepted_fd, socket_ctx *listening_ctx);
+socket_ctx *socket_ctx_accepted_new(int accepted_fd,
+    socket_ctx *listening_ctx, struct sockaddr addr, socklen_t addrlen);
 
 void socket_ctx_free(socket_ctx *sock_ctx);
 
-int prepare_socket_for_connection(socket_ctx *sock_ctx);
+int prepare_socket_for_connection(socket_ctx *sock_ctx,
+            const struct sockaddr *addr, socklen_t addrlen);
 
 int attempt_socket_tls_connection(socket_ctx *sock_ctx);
-
-
 
 int is_wrong_socket_state(socket_ctx* sock_ctx, int num, ...);
 

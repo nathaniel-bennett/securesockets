@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <string.h>
+#include <netdb.h>
 
 #include <openssl/ssl.h>
 
@@ -45,12 +46,6 @@ socket_ctx *socket_ctx_new(int sockfd)
     if (sock_ctx == NULL)
         goto err;
 
-    sock_ctx->addr = calloc(1, sizeof(struct sockaddr));
-    if (sock_ctx->addr == NULL)
-        goto err;
-
-    sock_ctx->fd = -1;
-
     sock_ctx->ssl_ctx = create_secure_ssl_ctx();
     if (sock_ctx->ssl_ctx == NULL) {
 
@@ -88,7 +83,8 @@ void stop_accepting_connection(socket_ctx *listener)
     }
 }
 
-socket_ctx *socket_ctx_accepted_new(int accepted_fd, socket_ctx *listening_ctx)
+socket_ctx *socket_ctx_accepted_new(int accepted_fd,
+            socket_ctx *listening_ctx, struct sockaddr addr, socklen_t addrlen)
 {
     socket_ctx *sock_ctx;
     int id;
@@ -98,7 +94,15 @@ socket_ctx *socket_ctx_accepted_new(int accepted_fd, socket_ctx *listening_ctx)
     if (sock_ctx == NULL)
         goto err;
 
+
     sock_ctx->fd = accepted_fd;
+
+    sock_ctx->addr = malloc(addrlen);
+    if (sock_ctx->addr == NULL)
+        goto err;
+
+    memcpy(sock_ctx->addr, &addr, addrlen);
+    sock_ctx->addrlen = addrlen;
 
     sock_ctx->ssl = SSL_new(listening_ctx->ssl_ctx);
     if (sock_ctx->ssl == NULL)
@@ -119,7 +123,6 @@ socket_ctx *socket_ctx_accepted_new(int accepted_fd, socket_ctx *listening_ctx)
     if (ret != 0)
         goto err;
 
-
     sock_ctx->id = id;
     sock_ctx->state = SOCKET_CONNECTING_TLS;
 
@@ -138,8 +141,10 @@ void socket_ctx_free(socket_ctx *sock_ctx)
 {
     int error = errno;
 
+
     if (sock_ctx->addr != NULL)
         free(sock_ctx->addr);
+
 
     if (sock_ctx->ssl != NULL)
         SSL_free(sock_ctx->ssl);
@@ -269,7 +274,8 @@ int is_wrong_socket_state(socket_ctx* sock_ctx, int num, ...)
 
 
 
-int prepare_socket_for_connection(socket_ctx *sock_ctx)
+int prepare_socket_for_connection(socket_ctx *sock_ctx,
+            const struct sockaddr *addr, socklen_t addrlen)
 {
     sock_ctx->ssl = SSL_new(sock_ctx->ssl_ctx);
     if (sock_ctx->ssl == NULL)
@@ -286,6 +292,15 @@ int prepare_socket_for_connection(socket_ctx *sock_ctx)
     ret = SSL_set_tlsext_host_name(sock_ctx->ssl, sock_ctx->hostname);
     if (ret != 1)
         goto err;
+
+    sock_ctx->addr = malloc(addrlen);
+    if (sock_ctx->addr == NULL) {
+        set_errno_code(sock_ctx, errno);
+        return 0;
+    }
+
+    memcpy(sock_ctx->addr, addr, addrlen);
+    sock_ctx->addrlen = addrlen;
 
     return 1;
 err:
