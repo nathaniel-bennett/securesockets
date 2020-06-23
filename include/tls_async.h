@@ -7,6 +7,8 @@
 
 int WRAPPER_fcntl(int fd, int cmd, ...);
 
+/* TODO: add WRAPPER_ioctl */
+
 /*
 void WRAPPER_fd_clr(int fd, fd_set *set);
 
