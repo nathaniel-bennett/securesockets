@@ -10,12 +10,17 @@ This library is meant to be helpful for anyone who wants to use TLS connections 
 
 ## Status
 
-The project is currently under early development. The basic sockets functions (such as `socket()`, `connect()`, `listen()`, etc) have been fully implemented, though certain functions such as `shutdown()` and `fcntl()` don't yet fully work for TLS sockets. The functions work whether blocking or non-blocking, though functions associated with non-blocking operation (such as `select()` or `poll()`) have no working implementation either. Most of the development is currently focused on client-side connections; however, server-side connections are in the roadworks.
+The project is currently under early development. The basic sockets functions (such as `socket()`, `connect()`, `listen()`, etc) have been fully implemented, though certain functions such as `shutdown()` and `ioctl()` don't yet fully work for TLS sockets. The functions work whether blocking or non-blocking, though some functions associated with non-blocking operation (such as `select()` or `epoll()`) have no working implementation either. Most of the development is currently focused on client-side connections; however, server-side connections are on the roadmap.
+
+The following features are considered pretty stable to use:
+- Blocking and non-blocking POSIX API calls, other than `shutdown()`
+- Setting non-blocking sockets with `fcntl()`, as well as `socket()` or `accept4()` combined with the `SOCK_NONBLOCK` flag.
+- Using `poll()` to moniter connecting/connected client-side file descriptors for read/write ability
 
 The following features are in active development and should be added to the Secure Sockets library within the next month:
 
-- Support for `fcntl()` (especially setting a socket to be non-blocking)
-- Support for built-in asynchronous functions (`select()`, `poll()`, and `epoll()`)
+- Server-side support and tests for `poll()`
+- Support for other built-in asynchronous functions (`select()` and `epoll()`)
 - Full revocation checks for each client connection made (using OCSP caching and OCSP responders)
 
 Other features are in the planning phase:
@@ -23,6 +28,7 @@ Other features are in the planning phase:
 - Caching of revocation responses to reduce connection time on repeatedly visited hosts
 - Server-side certificate/PrivateKey loading via `setsockopt()` calls
 - A plethora of `setsockopt()` and `getsockopt()` additions for fine-tuning of TLS connection settings
-- Built-in threadlocks to make each TLS socket thread-safe (NOTE: regular sockets will remain not thread-safe)
-- Support for Libevent functions
+- Built-in threadlocks to make each TLS socket thread-safe (NOTE: regular non-TLS sockets will remain NOT thread-safe)
+- Support for Libevent functions/other libraries that provide helpful functionality to TCP sockets
 - MacOS, Windows and BSD portability
+- Certificate Transparency for both client and server
