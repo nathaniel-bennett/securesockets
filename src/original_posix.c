@@ -42,7 +42,7 @@ int o_getsockopt(int sockfd, int level,
 }
 
 int o_setsockopt(int sockfd, int level,
-                 int optname, void *optval, socklen_t optlen)
+                 int optname, const void *optval, socklen_t optlen)
 {
     return setsockopt(sockfd, level, optname, optval, optlen);
 }

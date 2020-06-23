@@ -40,7 +40,7 @@ int WRAPPER_getsockopt(int sockfd, int level,
             int optname, void *optval, socklen_t *optlen);
 
 int WRAPPER_setsockopt(int sockfd, int level,
-            int optname, void *optval, socklen_t optlen);
+            int optname, const void *optval, socklen_t optlen);
 
 
 int WRAPPER_read(int fd, void *buf, size_t count);
@@ -78,7 +78,7 @@ int WRAPPER_recv(int sockfd, void *buf, size_t len, int flags);
 
 #define read(fd, buf, count) WRAPPER_read(fd, buf, count)
 
-#define write(fd, buf, count) WRAPPER_write(fd, buf, count);
+#define write(fd, buf, count) WRAPPER_write(fd, buf, count)
 
 #define send(sockfd, buf, len, flags) WRAPPER_send(sockfd, buf, len, flags)
 

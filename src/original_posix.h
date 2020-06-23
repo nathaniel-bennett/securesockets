@@ -25,7 +25,7 @@ int o_getsockopt(int sockfd, int level,
                        int optname, void *optval, socklen_t *optlen);
 
 int o_setsockopt(int sockfd, int level,
-                       int optname, void *optval, socklen_t optlen);
+                       int optname, const void *optval, socklen_t optlen);
 
 
 int o_read(int fd, void *buf, size_t count);

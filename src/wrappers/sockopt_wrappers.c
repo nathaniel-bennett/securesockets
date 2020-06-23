@@ -111,7 +111,7 @@ int WRAPPER_getsockopt(int sockfd, int level,
 
 
 int WRAPPER_setsockopt(int sockfd, int level,
-                       int optname, void *optval, socklen_t optlen)
+                       int optname, const void *optval, socklen_t optlen)
 {
     socket_ctx *sock_ctx;
 
