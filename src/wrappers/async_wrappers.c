@@ -12,9 +12,16 @@
 #include "../../include/tls.h"
 #include "../../include/tls_async.h"
 
-
+typedef struct tls_pair_st {
+    int id;
+    socket_ctx *sock_ctx;
+} tls_pair;
 
 int get_fd_to_watch(socket_ctx *sock_ctx);
+
+void update_tls_sockets(tls_pair *tls_sockets,
+            struct pollfd *fds, nfds_t nfds, int *num_ready);
+int update_tls_socket_state(socket_ctx *sock_ctx, struct pollfd *poll_st);
 
 struct timespec sum_of_times(struct timespec time1, struct timespec time2);
 int time_is_after(struct timespec curr, struct timespec end_time);
@@ -79,34 +86,28 @@ int WRAPPER_poll(struct pollfd *fds, nfds_t nfds, int timeout)
         return WRAPPER_ppoll(fds, nfds, NULL, NULL);
 
 
-    timeout_nano.tv_sec = timeout/1000;
-    timeout_nano.tv_nsec = (timeout%1000)*1000000;
+    timeout_nano.tv_sec = timeout / 1000;
+    timeout_nano.tv_nsec = (timeout % 1000) * 1000000;
 
     return WRAPPER_ppoll(fds, nfds, &timeout_nano, NULL);
 }
 
 
-/* TODO: set SO_ERROR getsockopt everywhere (esp. here) */
 int WRAPPER_ppoll(struct pollfd *fds, nfds_t nfds,
                   const struct timespec *tmo_p, const sigset_t *sigmask)
 {
-    struct tls_pair {
-        int id;
-        socket_ctx *sock_ctx;
-    };
-
     struct timespec end_time, curr_time;
-    struct tls_pair tls_sockets[nfds];
+    tls_pair tls_sockets[nfds];
     int has_time_left = 1;
     int num_ready = -1;
-    int ret, i;
+    int i;
 
     if (tmo_p != NULL) {
         clock_gettime(CLOCK_MONOTONIC_RAW, &end_time); /* TODO: check error */
         end_time = sum_of_times(end_time, *tmo_p);
     }
 
-    memset(tls_sockets, 0, nfds * sizeof(struct tls_pair));
+    memset(tls_sockets, 0, nfds * sizeof(tls_pair));
     clear_global_errors();
 
     for (i = 0; i < nfds; i++) {
@@ -129,76 +130,7 @@ int WRAPPER_ppoll(struct pollfd *fds, nfds_t nfds,
         if (num_ready <= 0)
             goto end;
 
-        for (i = 0; i < nfds; i++) {
-            socket_ctx* sock_ctx = tls_sockets[i].sock_ctx;
-            if (sock_ctx == NULL)
-                continue;
-
-            if (fds[i].revents & POLLERR) {
-                int error;
-                socklen_t error_size = sizeof(int);
-                ret = o_getsockopt(fds[i].fd,
-                            SOL_SOCKET, SO_ERROR, &error, &error_size);
-                if (ret != 0)
-                    sock_ctx->error_code = ECANCELED; /* TODO: fix */
-                else
-                    sock_ctx->error_code = error;
-                continue; /* TODO: wipe POLLIN | POLLOUT flags? */
-            }
-
-            if (!(fds[i].revents & (POLLIN | POLLOUT)))
-                continue;
-
-            switch (sock_ctx->state) {
-            case SOCKET_CONNECTING_DNS:
-            case SOCKET_CONNECTING_TCP:
-            case SOCKET_CONNECTING_TLS:
-            case SOCKET_FINISHING_CONN:
-                ret = connect(sock_ctx->id, sock_ctx->addr, sock_ctx->addrlen);
-                if (ret < 0) {
-                    fds[i].revents &= ~(POLLIN | POLLOUT);
-
-                    if (errno != EAGAIN && errno != EALREADY)
-                        fds[i].revents |= POLLERR;
-                    else
-                        num_ready--;
-                }
-                break;
-
-            case SOCKET_LISTENING:
-                /* in case poll happens to be level-triggered */
-                if (sock_ctx->accept_ctx != NULL
-                    && sock_ctx->accept_ctx->state == SOCKET_FINISHING_CONN) {
-                    break;
-                }
-
-                ret = accept(sock_ctx->id, NULL, 0);
-                /* ret should ALWAYS be less than 0 here */
-                if (ret >= 0) {
-                    /* TODO: for testing only--take out before prod */
-                    fprintf(stderr,
-                        "FATAL ERROR: accept in poll returned >= 0\n");
-                    break;
-                }
-
-                if (errno != EWOULDBLOCK && errno != EAGAIN) {
-                    fds[i].revents &= ~(POLLIN | POLLOUT);
-                    fds[i].revents |= POLLERR;
-
-                } else if (sock_ctx->accept_ctx == NULL
-                    || sock_ctx->accept_ctx->state != SOCKET_FINISHING_CONN) {
-                    fds[i].revents &= ~(POLLIN | POLLOUT);
-                    num_ready--;
-                }
-
-                break;
-
-            default:
-                fds[i].revents &= ~(POLLIN | POLLOUT);
-                fds[i].revents |= POLLERR;
-                break;
-            }
-        }
+        update_tls_sockets(tls_sockets, fds, nfds, &num_ready);
 
         if (tmo_p != NULL) {
             clock_gettime(CLOCK_MONOTONIC_RAW, &curr_time);
@@ -206,6 +138,7 @@ int WRAPPER_ppoll(struct pollfd *fds, nfds_t nfds,
                 has_time_left = 0;
         }
 
+        errno = NO_ERROR;
     } while (num_ready == 0 && has_time_left);
 
 end:
@@ -215,6 +148,107 @@ end:
     }
 
     return num_ready;
+}
+
+void update_tls_sockets(tls_pair *tls_sockets,
+            struct pollfd *fds, nfds_t nfds, int *num_ready)
+{
+    int ret, i;
+
+    for (i = 0; i < nfds; i++) {
+        socket_ctx* sock_ctx = tls_sockets[i].sock_ctx;
+        if (sock_ctx == NULL)
+            continue;
+
+        if (fds[i].revents & POLLERR) {
+            int error;
+            socklen_t error_size = sizeof(int);
+            ret = o_getsockopt(fds[i].fd,
+                SOL_SOCKET, SO_ERROR, &error, &error_size);
+            if (ret != 0)
+                sock_ctx->error_code = ECANCELED; /* TODO: get better errno? */
+            else
+                sock_ctx->error_code = error;
+            continue;
+        }
+
+        if (!(fds[i].revents & (POLLIN | POLLOUT)))
+            continue; /* catches all other errors */
+
+       ret = update_tls_socket_state(sock_ctx, &fds[i]);
+       if (ret != 0)
+           *num_ready -= 1;
+    }
+}
+
+int update_tls_socket_state(socket_ctx *sock_ctx, struct pollfd *poll_st)
+{
+    int ret;
+
+    switch (sock_ctx->state) {
+    case SOCKET_CONNECTING_DNS:
+    case SOCKET_CONNECTING_TCP:
+    case SOCKET_CONNECTING_TLS:
+    case SOCKET_FINISHING_CONN:
+        /* because poll is level-triggered, connect only needs POLLOUT
+         * to succeed (even though it reads in the TLS handshake) */
+        ret = connect(sock_ctx->id, sock_ctx->addr, sock_ctx->addrlen);
+        if (ret < 0) {
+            poll_st->revents &= ~(POLLIN | POLLOUT);
+
+            if (errno != EAGAIN && errno != EALREADY)
+                poll_st->revents |= POLLERR;
+            else
+                return -1;
+
+        } else {
+            poll_st->revents & ~POLLIN;
+            if (poll_st->revents == 0)
+                return -1;
+        }
+        return 0;
+
+    case SOCKET_LISTENING:
+        if (sock_ctx->accept_ctx != NULL
+            && sock_ctx->accept_ctx->state == SOCKET_FINISHING_CONN) {
+            /* already has an accepted socket ready */
+            return 0;
+        }
+
+        if (!(poll_st->events & POLLIN)) {
+            poll_st->revents = POLLERR;
+            set_socket_error(sock_ctx, ECANCELED, "Poll error: "
+                    "listening sockets require POLLIN to function properly");
+            return 0;
+        }
+
+        ret = accept(sock_ctx->id, NULL, 0);
+
+        /* ret should ALWAYS be less than 0 here */
+        if (ret >= 0) {
+            /* TODO: for testing only--take out before prod */
+            fprintf(stderr,
+                "FATAL ERROR: accept in poll returned >= 0\n");
+            return 0;
+        }
+
+        if (sock_ctx->accept_ctx == NULL
+                    || sock_ctx->accept_ctx->state != SOCKET_FINISHING_CONN) {
+
+            poll_st->revents &= ~(POLLIN | POLLOUT);
+
+            if (sock_ctx->state == SOCKET_ERROR)
+                poll_st->revents |= POLLERR;
+
+            /* silently ignore non-fatal accept errors (such as TLS errors) */
+            return -1;
+        }
+
+        return 0;
+
+    default:
+        return 0;
+    }
 }
 
 int get_fd_to_watch(socket_ctx *sock_ctx)
