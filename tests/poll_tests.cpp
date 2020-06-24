@@ -140,6 +140,47 @@ TEST_F(PollTests, Connect1) {
 }
 
 
+TEST_F(PollTests, ConnectTimeout1) {
+
+    fd = socket(AF_INET,
+        SOCK_STREAM | SOCK_NONBLOCK, IPPROTO_TLS);
+    int socket_errno = errno;
+
+    if (fd < 0)
+        fprintf(stderr, "Socket creation failed with errno %i: %s\n",
+            socket_errno, strerror(socket_errno));
+
+    EXPECT_EQ(socket_errno, 0);
+    ASSERT_GE(fd, 0);
+
+    int hostname_setsockopt_return = setsockopt(fd,
+        IPPROTO_TLS, SO_TLS_HOSTNAME, HOSTNAME, strlen(HOSTNAME)+1);
+    int hostname_errno = errno;
+
+    EXPECT_EQ(hostname_errno, 0);
+    ASSERT_EQ(hostname_setsockopt_return, 0);
+
+    int connect_return = connect(fd, address, addrlen);
+    int connect_errno = errno;
+
+    EXPECT_EQ(connect_errno, EINPROGRESS);
+    ASSERT_EQ(connect_return, -1);
+
+    struct pollfd fd_struct = {0};
+    fd_struct.fd = fd;
+    fd_struct.events = POLLIN | POLLOUT | POLLERR | POLLPRI | POLLHUP;
+
+    int poll_return = poll(&fd_struct, 1, 20);
+    int poll_errno = errno;
+
+    EXPECT_EQ(poll_errno, 0);
+    ASSERT_EQ(poll_return, 0);
+
+    close(fd);
+    fd = -1;
+}
+
+
 TEST_F(PollTests, ConnectWriteRead1) {
 
     fd = socket(AF_INET,
