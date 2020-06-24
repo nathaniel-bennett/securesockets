@@ -26,7 +26,7 @@ add_library(securesockets
 
 
 add_executable(async_test_simple
-        tests/async_test.cpp)
+        tests/poll_tests.cpp)
 target_link_libraries(async_test_simple "gtest" "gtest_main" "pthread")
 target_link_libraries(async_test_simple "securesockets")
 
