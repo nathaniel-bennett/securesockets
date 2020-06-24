@@ -23,6 +23,7 @@ void update_tls_sockets(tls_pair *tls_sockets,
             struct pollfd *fds, nfds_t nfds, int *num_ready);
 int update_tls_socket_state(socket_ctx *sock_ctx, struct pollfd *poll_st);
 
+struct timespec get_time();
 struct timespec sum_of_times(struct timespec time1, struct timespec time2);
 int time_is_after(struct timespec curr, struct timespec end_time);
 
@@ -102,10 +103,8 @@ int WRAPPER_ppoll(struct pollfd *fds, nfds_t nfds,
     int num_ready = -1;
     int i;
 
-    if (tmo_p != NULL) {
-        clock_gettime(CLOCK_MONOTONIC_RAW, &end_time); /* TODO: check error */
-        end_time = sum_of_times(end_time, *tmo_p);
-    }
+    if (tmo_p != NULL)
+        end_time = sum_of_times(get_time(), *tmo_p);
 
     memset(tls_sockets, 0, nfds * sizeof(tls_pair));
     clear_global_errors();
@@ -133,8 +132,9 @@ int WRAPPER_ppoll(struct pollfd *fds, nfds_t nfds,
         update_tls_sockets(tls_sockets, fds, nfds, &num_ready);
 
         if (tmo_p != NULL) {
-            clock_gettime(CLOCK_MONOTONIC_RAW, &curr_time);
-            if (time_is_after(curr_time, end_time))
+            curr_time = get_time();
+            if ((curr_time.tv_sec == 0 && curr_time.tv_nsec == 0)
+                        || time_is_after(curr_time, end_time))
                 has_time_left = 0;
         }
 
@@ -260,6 +260,32 @@ int get_fd_to_watch(socket_ctx *sock_ctx)
             fds[i].fd = sock_ctx->rev_ctx->fd; */
     else
         return sock_ctx->fd;
+}
+
+
+struct timespec get_time()
+{
+    struct timespec time;
+    int ret;
+
+#ifdef _POSIX_MONOTONIC_CLOCK
+    ret = clock_gettime(CLOCK_MONOTONIC_RAW, &time);
+    if (ret == 0)
+        return time;
+
+    ret = clock_gettime(CLOCK_MONOTONIC, &time);
+    if (ret == 0)
+        return time;
+#endif
+
+    ret = clock_gettime(CLOCK_REALTIME, &time);
+    if (ret == 0)
+        return time;
+
+    /* all clocks failed, setting to 0 to indicate failure */
+    time.tv_sec = 0;
+    time.tv_nsec = 0;
+    return time;
 }
 
 struct timespec sum_of_times(struct timespec time1, struct timespec time2)
