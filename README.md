@@ -27,7 +27,7 @@ Other features are in the planning phase:
 
 - Caching of revocation responses to reduce connection time on repeatedly visited hosts
 - Server-side certificate/PrivateKey loading via `setsockopt()` calls
-- A plethora of `setsockopt()` and `getsockopt()` additions for fine-tuning of TLS connection settings
+- Several `setsockopt()` and `getsockopt()` additions for fine-tuning of TLS connection settings
 - Built-in threadlocks to make each TLS socket thread-safe (NOTE: regular non-TLS sockets will remain NOT thread-safe)
 - Support for Libevent functions/other libraries that provide helpful functionality to TCP sockets
 - MacOS, Windows and BSD portability
